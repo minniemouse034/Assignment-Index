@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useInView } from "react-intersection-observer";
 import { getPokemon, getGenerations } from "../actions/getPokemon";
 import SelectGeneration from "./SelectGeneration";
 import PokemonCard, { Pokemon } from "./PokemonCard";
 import ClipLoader from "react-spinners/ClipLoader";
+
+interface FetchError {
+  response?: {
+    status: number;
+  };
+  message: string;
+}
 
 function LoadingPokemon() {
   const [pokemon, setPokemon] = useState<Pokemon[]>([]);
@@ -19,7 +26,7 @@ function LoadingPokemon() {
   const delay = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
 
-  const loadMorePokemon = async () => {
+  const loadMorePokemon = useCallback(async () => {
     if (isLoading || !hasMore) return;
     setIsLoading(true);
     setError(null);
@@ -34,32 +41,47 @@ function LoadingPokemon() {
           })
         : await getPokemon({ page: nextPage });
 
-      if (newPokemon.length === 0) {
+      if (newPokemon === null || newPokemon.length === 0) {
         setHasMore(false);
       } else {
         setPage(nextPage);
         setPokemon((prevPokemon) => {
-          if (!prevPokemon) return newPokemon; // null || undefined
+          if (!prevPokemon) return newPokemon; //null check
           const uniquePokemon = newPokemon.filter(
             (pokemon: Pokemon) =>
               !prevPokemon.some((poke) => poke.name === pokemon.name)
           );
-          return [...prevPokemon, ...uniquePokemon];
+          return [...(prevPokemon || []), ...uniquePokemon];
         });
       }
     } catch (err) {
-      setError("Failed to load more Pokémon. Please try again later.");
-      setHasMore(false);
+      handleFetchError(err);
     }
 
     setIsLoading(false);
+  }, [isLoading, hasMore, page, selectedGeneration]);
+
+  const handleFetchError = (err: unknown) => {
+    const error = err as FetchError;
+    if (error.response) {
+      if (error.response.status === 404) {
+        setError("404: Data not found.");
+      } else if (error.response.status === 500) {
+        setError("500: Internal server error. Please try again later.");
+      } else {
+        setError(`Error: ${error.response.status}`);
+      }
+    } else {
+      setError("Network error. Please check your connection.");
+    }
+    setHasMore(false);
   };
 
   useEffect(() => {
     if (inView) {
       loadMorePokemon();
     }
-  }, [inView]);
+  }, [inView, loadMorePokemon]);
 
   useEffect(() => {
     const fetchPokemon = async () => {
@@ -76,8 +98,8 @@ function LoadingPokemon() {
                 gen: parseInt(selectedGeneration),
                 page: 1,
               });
-        setPokemon(data);
-      } catch (err: any) {
+        setPokemon(data || []);
+      } catch (err) {
         handleFetchError(err);
       }
 
@@ -87,34 +109,20 @@ function LoadingPokemon() {
     fetchPokemon();
   }, [selectedGeneration]);
 
-  const handleFetchError = (err: any) => {
-    if (err.response) {
-      if (err.response.status === 404) {
-        setError("Pokemon not found.");
-      } else if (err.response.status === 500) {
-        setError("Server have problem. Please try again later.");
-      }
-    } else {
-      setError("Network error. Please check your connection.");
-    }
-    setHasMore(false);
-  };
-
   return (
     <div>
       <div className="flex justify-end text-sm pb-4">
         <SelectGeneration onGenerationChange={setSelectedGeneration} />
       </div>
 
-      {error && (
-        <div className="text-slate-200 text-center text-6xl mb-4">{error}</div>
-      )}
+      {error && <div className="text-slate-100 text-center mb-4">{error}</div>}
 
-      <div className="mx-0 grid grid-cols-6 sm:grid-cols-16 gap-8  ">
+      <div className="mx-0 grid grid-cols-6 sm:grid-cols-16 gap-8">
         {pokemon?.map((poke: Pokemon) => (
           <PokemonCard key={poke.url} pokemon={poke} />
         ))}
       </div>
+
       {isLoading && (
         <div ref={ref} className="flex justify-center items-center p-4">
           <ClipLoader color="white" />
